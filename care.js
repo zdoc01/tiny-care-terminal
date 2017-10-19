@@ -83,6 +83,7 @@ screen.key(['p', 'C-p'], function(ch, key) {
   }
 });
 
+// grid.set(row, col, rowSpan, colSpan, obj, opts)
 var grid = new contrib.grid({rows: 12, cols: 12, screen: screen});
 var boxes = buildBoxes(config.commitsGraph);
 var weatherBox =  boxes.weather;
@@ -129,7 +130,6 @@ function buildFirstQuadrantBoxes(showCommitsGraph) {
   };
 }
 
-// grid.set(row, col, rowSpan, colSpan, obj, opts)
 function buildTweetBoxes(col, colSpan) {
   var boxes = {};
   boxes[config.twitter[1]] = grid.set(2, col, 2, colSpan, blessed.box, makeBox(' 💖 '));
@@ -212,9 +212,25 @@ function doTheCodes() {
   var todayCommits = 0;
   var weekCommits = 0;
 
-  function getNumCommits(commits) {
+  // Tracks each commit hash we encounter
+  // to avoid duplicate logs
+  var cache = {
+    [TODAY_BOX_LABEL]: {
+      paths: []
+    },
+    [WEEK_BOX_LABEL]: {
+      paths: []
+    }
+  };
+
+  function getCommits(raw) {
     var commitRegex = /(.......) (- .*)/g;
-    return (commits) ? (commits.match(commitRegex) || []).length : '0';
+    var matched = raw && raw.match(commitRegex);
+    return matched || [];
+  }
+
+  function getNumCommits(commits) {
+    return getCommits(commits).length;
   }
 
   function updateBoxContent(box, content, numCommits) {
@@ -229,7 +245,32 @@ function doTheCodes() {
     return box;
   }
 
+  function dedupeCommits(commits, cacheKey) {
+    var oPath = commits.split('\n')[0],
+        path = oPath;
+
+    if (cache[cacheKey].paths.length) {
+      // commits for other repos have been rendered, so
+      // put some padding between those and the next repo
+      path = `\n${path}`;
+    }
+    cache[cacheKey].paths.push(path);
+
+    var allCommits = getCommits(commits);
+    var ret = allCommits.reduce((acc, commit) => {
+      var hash = commit.split(' ')[0];
+      if (!cache[cacheKey][hash]) {
+        cache[cacheKey][hash] = true;
+        return (acc) ? `${acc}\n${commit}` : commit;
+      }
+      return acc;
+    }, '');
+
+    return (oPath.charAt(0) === '/') ? `${path}\n${ret}` : ret;
+  }
+
   function updateWeekCommits(commits) {
+    commits = dedupeCommits(commits, WEEK_BOX_LABEL);
     weekCommits += getNumCommits(commits);
 
     updateBoxContent(weekBox, commits, weekCommits);
@@ -239,6 +280,7 @@ function doTheCodes() {
   }
 
   function updateTodayCommits(commits) {
+    commits = dedupeCommits(commits, TODAY_BOX_LABEL);
     todayCommits += getNumCommits(commits);
 
     updateBoxContent(todayBox, commits, todayCommits);
